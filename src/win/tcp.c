@@ -243,7 +243,13 @@ static int uv_tcp_try_bind(uv_tcp_t* handle,
   int r;
 
   if (handle->socket == INVALID_SOCKET) {
-    SOCKET sock = socket(addr->sa_family, SOCK_STREAM, 0);
+    SOCKET sock;
+    
+    /* Cannot set IPv6-only mode on non-IPv6 socket. */
+    if ((flags & UV_TCP_IPV6ONLY) && addr->sa_family != AF_INET6)
+      return ERROR_INVALID_PARAMETER;
+
+    sock = socket(addr->sa_family, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
       return WSAGetLastError();
     }
@@ -747,8 +753,9 @@ static int uv_tcp_try_connect(uv_connect_t* req,
 }
 
 
-int uv_tcp_getsockname(uv_tcp_t* handle, struct sockaddr* name,
-    int* namelen) {
+int uv_tcp_getsockname(const uv_tcp_t* handle,
+                       struct sockaddr* name,
+                       int* namelen) {
   int result;
 
   if (!(handle->flags & UV_HANDLE_BOUND)) {
@@ -768,8 +775,9 @@ int uv_tcp_getsockname(uv_tcp_t* handle, struct sockaddr* name,
 }
 
 
-int uv_tcp_getpeername(uv_tcp_t* handle, struct sockaddr* name,
-    int* namelen) {
+int uv_tcp_getpeername(const uv_tcp_t* handle,
+                       struct sockaddr* name,
+                       int* namelen) {
   int result;
 
   if (!(handle->flags & UV_HANDLE_BOUND)) {
@@ -802,7 +810,6 @@ int uv_tcp_write(uv_loop_t* loop,
   req->type = UV_WRITE;
   req->handle = (uv_stream_t*) handle;
   req->cb = cb;
-  memset(&req->overlapped, 0, sizeof(req->overlapped));
 
   /* Prepare the overlapped structure. */
   memset(&(req->overlapped), 0, sizeof(req->overlapped));

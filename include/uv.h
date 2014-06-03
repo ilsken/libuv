@@ -138,6 +138,7 @@ extern "C" {
   XX(UNKNOWN, "unknown error")                                                \
   XX(EOF, "end of file")                                                      \
   XX(ENXIO, "no such device or address")                                      \
+  XX(EMLINK, "too many links")                                                \
 
 #define UV_HANDLE_TYPE_MAP(XX)                                                \
   XX(ASYNC, async)                                                            \
@@ -166,6 +167,7 @@ extern "C" {
   XX(FS, fs)                                                                  \
   XX(WORK, work)                                                              \
   XX(GETADDRINFO, getaddrinfo)                                                \
+  XX(GETNAMEINFO, getnameinfo)                                                \
 
 typedef enum {
 #define XX(code, _) UV_ ## code = UV__ ## code,
@@ -215,6 +217,7 @@ typedef struct uv_signal_s uv_signal_t;
 /* Request types. */
 typedef struct uv_req_s uv_req_t;
 typedef struct uv_getaddrinfo_s uv_getaddrinfo_t;
+typedef struct uv_getnameinfo_s uv_getnameinfo_t;
 typedef struct uv_shutdown_s uv_shutdown_t;
 typedef struct uv_write_s uv_write_t;
 typedef struct uv_connect_s uv_connect_t;
@@ -296,7 +299,9 @@ UV_EXTERN void uv_loop_delete(uv_loop_t*);
  *    or requests left), or non-zero if more events are expected (meaning you
  *    should run the event loop again sometime in the future).
  *  - UV_RUN_NOWAIT: Poll for new events once but don't block if there are no
- *    pending events.
+ *    pending events. Returns zero when done (no active handles
+ *    or requests left), or non-zero if more events are expected (meaning you
+ *    should run the event loop again sometime in the future).
  */
 UV_EXTERN int uv_run(uv_loop_t*, uv_run_mode mode);
 
@@ -344,7 +349,7 @@ UV_EXTERN void uv_update_time(uv_loop_t*);
  *
  * Use uv_hrtime() if you need sub-millisecond granularity.
  */
-UV_EXTERN uint64_t uv_now(uv_loop_t*);
+UV_EXTERN uint64_t uv_now(const uv_loop_t*);
 
 /*
  * Get backend file descriptor. Only kqueue, epoll and event ports are
@@ -418,6 +423,10 @@ typedef void (*uv_after_work_cb)(uv_work_t* req, int status);
 typedef void (*uv_getaddrinfo_cb)(uv_getaddrinfo_t* req,
                                   int status,
                                   struct addrinfo* res);
+typedef void (*uv_getnameinfo_cb)(uv_getnameinfo_t* req,
+                                  int status,
+                                  char* hostname,
+                                  char* service);
 
 typedef struct {
   long tv_sec;
@@ -694,9 +703,8 @@ UV_EXTERN int uv_write2(uv_write_t* req,
  * Same as `uv_write()`, but won't queue write request if it can't be completed
  * immediately.
  * Will return either:
- * - positive number of bytes written
- * - zero - if queued write is needed
- * - negative error code
+ * - >= 0: number of bytes written (can be less than the supplied buffer size)
+ * - < 0: negative error code
  */
 UV_EXTERN int uv_try_write(uv_stream_t* handle,
                            const uv_buf_t bufs[],
@@ -808,10 +816,12 @@ enum uv_tcp_flags {
 UV_EXTERN int uv_tcp_bind(uv_tcp_t* handle,
                           const struct sockaddr* addr,
                           unsigned int flags);
-UV_EXTERN int uv_tcp_getsockname(uv_tcp_t* handle, struct sockaddr* name,
-    int* namelen);
-UV_EXTERN int uv_tcp_getpeername(uv_tcp_t* handle, struct sockaddr* name,
-    int* namelen);
+UV_EXTERN int uv_tcp_getsockname(const uv_tcp_t* handle,
+                                 struct sockaddr* name,
+                                 int* namelen);
+UV_EXTERN int uv_tcp_getpeername(const uv_tcp_t* handle,
+                                 struct sockaddr* name,
+                                 int* namelen);
 
 /*
  * Establish an IPv4 or IPv6 TCP connection.  Provide an initialized TCP handle
@@ -846,7 +856,15 @@ enum uv_udp_flags {
    * Indicates message was truncated because read buffer was too small. The
    * remainder was discarded by the OS. Used in uv_udp_recv_cb.
    */
-  UV_UDP_PARTIAL = 2
+  UV_UDP_PARTIAL = 2,
+  /* Indicates if SO_REUSEADDR will be set when binding the handle.
+   * This sets the SO_REUSEPORT socket flag on the BSDs and OS X. On other
+   * UNIX platforms, it sets the SO_REUSEADDR flag.  What that means is that
+   * multiple threads or processes can bind to the same address without error
+   * (provided they all set the flag) but only the last one to bind will receive
+   * any traffic, in effect "stealing" the port from the previous listener.
+   */
+  UV_UDP_REUSEADDR = 4
 };
 
 /*
@@ -864,8 +882,8 @@ typedef void (*uv_udp_send_cb)(uv_udp_send_t* req, int status);
  *          discard or repurpose the read buffer.
  *          < 0 if a transmission error was detected.
  *  buf     uv_buf_t with the received data.
- *  addr    struct sockaddr_in or struct sockaddr_in6.
- *          Valid for the duration of the callback only.
+ *  addr    struct sockaddr* containing the address of the sender.
+ *          Can be NULL. Valid for the duration of the callback only.
  *  flags   One or more OR'ed UV_UDP_* constants.
  *          Right now only UV_UDP_PARTIAL is used.
  */
@@ -921,18 +939,11 @@ UV_EXTERN int uv_udp_open(uv_udp_t* handle, uv_os_sock_t sock);
  *  handle    UDP handle. Should have been initialized with `uv_udp_init`.
  *  addr      struct sockaddr_in or struct sockaddr_in6 with the address and
  *            port to bind to.
- *  flags     Unused.
+ *  flags     Indicate how the socket will be bound, UV_UDP_IPV6ONLY and
+ *            UV_UDP_REUSEADDR are supported.
  *
  * Returns:
  *  0 on success, or an error code < 0 on failure.
- *
- * This sets the SO_REUSEPORT socket flag on the BSDs and OS X. On other
- * UNIX platforms, it sets the SO_REUSEADDR flag.  What that means is that
- * multiple threads or processes can bind to the same address without error
- * (provided they all set the flag) but only the last one to bind will receive
- * any traffic, in effect "stealing" the port from the previous listener.
- * This behavior is something of an anomaly and may be replaced by an explicit
- * opt-in mechanism in future versions of libuv.
  */
 UV_EXTERN int uv_udp_bind(uv_udp_t* handle,
                           const struct sockaddr* addr,
@@ -1446,6 +1457,33 @@ UV_EXTERN int uv_getaddrinfo(uv_loop_t* loop,
  * Free the struct addrinfo. Passing NULL is allowed and is a no-op.
  */
 UV_EXTERN void uv_freeaddrinfo(struct addrinfo* ai);
+
+
+/*
+* uv_getnameinfo_t is a subclass of uv_req_t
+*
+* Request object for uv_getnameinfo.
+*/
+struct uv_getnameinfo_s {
+  UV_REQ_FIELDS
+  /* read-only */
+  uv_loop_t* loop;
+  UV_GETNAMEINFO_PRIVATE_FIELDS
+};
+
+/*
+ * Asynchronous getnameinfo.
+ *
+ * Returns 0 on success or an error code < 0 on failure.
+ *
+ * If successful, your callback gets called sometime in the future with the
+ * lookup result.
+ */
+UV_EXTERN int uv_getnameinfo(uv_loop_t* loop,
+                             uv_getnameinfo_t* req,
+                             uv_getnameinfo_cb getnameinfo_cb,
+                             const struct sockaddr* addr,
+                             int flags);
 
 
 /* uv_spawn() options */
@@ -2053,8 +2091,8 @@ UV_EXTERN int uv_ip4_addr(const char* ip, int port, struct sockaddr_in* addr);
 UV_EXTERN int uv_ip6_addr(const char* ip, int port, struct sockaddr_in6* addr);
 
 /* Convert binary addresses to strings */
-UV_EXTERN int uv_ip4_name(struct sockaddr_in* src, char* dst, size_t size);
-UV_EXTERN int uv_ip6_name(struct sockaddr_in6* src, char* dst, size_t size);
+UV_EXTERN int uv_ip4_name(const struct sockaddr_in* src, char* dst, size_t size);
+UV_EXTERN int uv_ip6_name(const struct sockaddr_in6* src, char* dst, size_t size);
 
 /* Cross-platform IPv6-capable implementation of the 'standard' inet_ntop */
 /* and inet_pton functions. On success they return 0. If an error */
@@ -2121,7 +2159,7 @@ UV_EXTERN int uv_dlsym(uv_lib_t* lib, const char* name, void** ptr);
 /*
  * Returns the last uv_dlopen() or uv_dlsym() error message.
  */
-UV_EXTERN const char* uv_dlerror(uv_lib_t* lib);
+UV_EXTERN const char* uv_dlerror(const uv_lib_t* lib);
 
 /*
  * The mutex functions return 0 on success or an error code < 0
@@ -2201,8 +2239,14 @@ UV_EXTERN void uv_key_delete(uv_key_t* key);
 UV_EXTERN void* uv_key_get(uv_key_t* key);
 UV_EXTERN void uv_key_set(uv_key_t* key, void* value);
 
-UV_EXTERN int uv_thread_create(uv_thread_t *tid,
-    void (*entry)(void *arg), void *arg);
+/*
+ * Callback that is invoked to initialize thread execution.
+ *
+ * `arg` is the same value that was passed to uv_thread_create().
+ */
+typedef void (*uv_thread_cb)(void* arg);
+
+UV_EXTERN int uv_thread_create(uv_thread_t* tid, uv_thread_cb entry, void* arg);
 UV_EXTERN unsigned long uv_thread_self(void);
 UV_EXTERN int uv_thread_join(uv_thread_t *tid);
 
@@ -2243,6 +2287,7 @@ struct uv_loop_s {
 #undef UV_ASYNC_PRIVATE_FIELDS
 #undef UV_TIMER_PRIVATE_FIELDS
 #undef UV_GETADDRINFO_PRIVATE_FIELDS
+#undef UV_GETNAMEINFO_PRIVATE_FIELDS
 #undef UV_FS_REQ_PRIVATE_FIELDS
 #undef UV_WORK_PRIVATE_FIELDS
 #undef UV_FS_EVENT_PRIVATE_FIELDS

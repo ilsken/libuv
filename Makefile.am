@@ -51,6 +51,7 @@ libuv_la_SOURCES += src/win/async.c \
                     src/win/fs-event.c \
                     src/win/fs.c \
                     src/win/getaddrinfo.c \
+                    src/win/getnameinfo.c \
                     src/win/handle.c \
                     src/win/handle-inl.h \
                     src/win/internal.h \
@@ -86,6 +87,7 @@ libuv_la_SOURCES += src/unix/async.c \
                    src/unix/dl.c \
                    src/unix/fs.c \
                    src/unix/getaddrinfo.c \
+                   src/unix/getnameinfo.c \
                    src/unix/internal.h \
                    src/unix/loop-watcher.c \
                    src/unix/loop.c \
@@ -138,6 +140,7 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-get-loadavg.c \
                          test/test-get-memory.c \
                          test/test-getaddrinfo.c \
+                         test/test-getnameinfo.c \
                          test/test-getsockname.c \
                          test/test-hrtime.c \
                          test/test-idle.c \
@@ -163,6 +166,7 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-pipe-server-close.c \
                          test/test-platform-output.c \
                          test/test-poll-close.c \
+                         test/test-poll-closesocket.c \
                          test/test-poll.c \
                          test/test-process-title.c \
                          test/test-ref.c \
@@ -200,9 +204,11 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-timer-from-check.c \
                          test/test-timer.c \
                          test/test-tty.c \
+                         test/test-udp-bind.c \
                          test/test-udp-dgram-too-big.c \
                          test/test-udp-ipv6.c \
                          test/test-udp-multicast-interface.c \
+                         test/test-udp-multicast-interface6.c \
                          test/test-udp-multicast-join.c \
                          test/test-udp-multicast-join6.c \
                          test/test-udp-multicast-ttl.c \

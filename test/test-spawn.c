@@ -26,8 +26,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _WIN32
-#include <unistd.h>
+#ifdef _WIN32
+# if defined(__MINGW32__)
+#  include <basetyps.h>
+# endif
+# include <shellapi.h>
+#else
+# include <unistd.h>
 #endif
 
 
@@ -166,6 +171,7 @@ TEST_IMPL(spawn_fails) {
   r = uv_spawn(uv_default_loop(), &process, &options);
   ASSERT(r == UV_ENOENT || r == UV_EACCES);
   ASSERT(0 == uv_is_active((uv_handle_t*) &process));
+  uv_close((uv_handle_t*) &process, NULL);
   ASSERT(0 == uv_run(uv_default_loop(), UV_RUN_DEFAULT));
 
   MAKE_VALGRIND_HAPPY();
@@ -685,9 +691,9 @@ TEST_IMPL(spawn_closed_process_io) {
   uv_write_t write_req;
   uv_buf_t buf;
   uv_stdio_container_t stdio[2];
-  static char buffer[] = "hello-from-spawn_stdin";
+  static char buffer[] = "hello-from-spawn_stdin\n";
 
-  init_process_options("spawn_helper1", exit_cb);
+  init_process_options("spawn_helper3", exit_cb);
 
   uv_pipe_init(uv_default_loop(), &in, 0);
   options.stdio = stdio;
@@ -802,6 +808,7 @@ WCHAR* quote_cmd_arg(const WCHAR *source, WCHAR *target);
 
 TEST_IMPL(argument_escaping) {
   const WCHAR* test_str[] = {
+    L"",
     L"HelloWorld",
     L"Hello World",
     L"Hello\"World",
@@ -831,6 +838,7 @@ TEST_IMPL(argument_escaping) {
   WCHAR* non_verbatim_output;
 
   test_output = calloc(count, sizeof(WCHAR*));
+  ASSERT(test_output != NULL);
   for (i = 0; i < count; ++i) {
     test_output[i] = calloc(2 * (wcslen(test_str[i]) + 2), sizeof(WCHAR));
     quote_cmd_arg(test_str[i], test_output[i]);
@@ -839,6 +847,7 @@ TEST_IMPL(argument_escaping) {
     total_size += wcslen(test_output[i]) + 1;
   }
   command_line = calloc(total_size + 1, sizeof(WCHAR));
+  ASSERT(command_line != NULL);
   for (i = 0; i < count; ++i) {
     wcscat(command_line, test_output[i]);
     wcscat(command_line, L" ");
@@ -928,6 +937,28 @@ TEST_IMPL(environment_creation) {
 
   ASSERT(wcscmp(expected, env) == 0);
 
+  return 0;
+}
+
+// Regression test for issue #909
+TEST_IMPL(spawn_with_an_odd_path) {
+  int r;
+
+  char newpath[2048];
+  char *path = getenv("PATH");
+  ASSERT(path != NULL);
+  snprintf(newpath, 2048, ";.;%s", path);
+  SetEnvironmentVariable("PATH", path);
+
+  init_process_options("", exit_cb);
+  options.file = options.args[0] = "program-that-had-better-not-exist";
+  r = uv_spawn(uv_default_loop(), &process, &options);
+  ASSERT(r == UV_ENOENT || r == UV_EACCES);
+  ASSERT(0 == uv_is_active((uv_handle_t*) &process));
+  uv_close((uv_handle_t*) &process, NULL);
+  ASSERT(0 == uv_run(uv_default_loop(), UV_RUN_DEFAULT));
+
+  MAKE_VALGRIND_HAPPY();
   return 0;
 }
 #endif
