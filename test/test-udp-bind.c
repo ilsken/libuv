@@ -27,58 +27,30 @@
 #include <string.h>
 
 
-TEST_IMPL(udp_options) {
-  static int invalid_ttls[] = { -1, 0, 256 };
+TEST_IMPL(udp_bind) {
   struct sockaddr_in addr;
   uv_loop_t* loop;
-  uv_udp_t h;
-  int i, r;
+  uv_udp_t h1, h2;
+  int r;
 
   ASSERT(0 == uv_ip4_addr("0.0.0.0", TEST_PORT, &addr));
 
   loop = uv_default_loop();
 
-  r = uv_udp_init(loop, &h);
+  r = uv_udp_init(loop, &h1);
   ASSERT(r == 0);
 
-  uv_unref((uv_handle_t*)&h); /* don't keep the loop alive */
-
-  r = uv_udp_bind(&h, (const struct sockaddr*) &addr, 0);
+  r = uv_udp_init(loop, &h2);
   ASSERT(r == 0);
 
-  r = uv_udp_set_broadcast(&h, 1);
-  r |= uv_udp_set_broadcast(&h, 1);
-  r |= uv_udp_set_broadcast(&h, 0);
-  r |= uv_udp_set_broadcast(&h, 0);
+  r = uv_udp_bind(&h1, (const struct sockaddr*) &addr, 0);
   ASSERT(r == 0);
 
-  /* values 1-255 should work */
-  for (i = 1; i <= 255; i++) {
-    r = uv_udp_set_ttl(&h, i);
-    ASSERT(r == 0);
-  }
+  r = uv_udp_bind(&h2, (const struct sockaddr*) &addr, 0);
+  ASSERT(r == UV_EADDRINUSE);
 
-  for (i = 0; i < (int) ARRAY_SIZE(invalid_ttls); i++) {
-    r = uv_udp_set_ttl(&h, invalid_ttls[i]);
-    ASSERT(r == UV_EINVAL);
-  }
-
-  r = uv_udp_set_multicast_loop(&h, 1);
-  r |= uv_udp_set_multicast_loop(&h, 1);
-  r |= uv_udp_set_multicast_loop(&h, 0);
-  r |= uv_udp_set_multicast_loop(&h, 0);
-  ASSERT(r == 0);
-
-  /* values 0-255 should work */
-  for (i = 0; i <= 255; i++) {
-    r = uv_udp_set_multicast_ttl(&h, i);
-    ASSERT(r == 0);
-  }
-
-  /* anything >255 should fail */
-  r = uv_udp_set_multicast_ttl(&h, 256);
-  ASSERT(r == UV_EINVAL);
-  /* don't test ttl=-1, it's a valid value on some platforms */
+  uv_close((uv_handle_t*) &h1, NULL);
+  uv_close((uv_handle_t*) &h2, NULL);
 
   r = uv_run(loop, UV_RUN_DEFAULT);
   ASSERT(r == 0);
@@ -88,22 +60,33 @@ TEST_IMPL(udp_options) {
 }
 
 
-TEST_IMPL(udp_no_autobind) {
+TEST_IMPL(udp_bind_reuseaddr) {
+  struct sockaddr_in addr;
   uv_loop_t* loop;
-  uv_udp_t h;
+  uv_udp_t h1, h2;
+  int r;
+
+  ASSERT(0 == uv_ip4_addr("0.0.0.0", TEST_PORT, &addr));
 
   loop = uv_default_loop();
 
-  ASSERT(0 == uv_udp_init(loop, &h));
-  ASSERT(UV_EBADF == uv_udp_set_multicast_ttl(&h, 32));
-  ASSERT(UV_EBADF == uv_udp_set_broadcast(&h, 1));
-  ASSERT(UV_EBADF == uv_udp_set_ttl(&h, 1));
-  ASSERT(UV_EBADF == uv_udp_set_multicast_loop(&h, 1));
-  ASSERT(UV_EBADF == uv_udp_set_multicast_interface(&h, "0.0.0.0"));
+  r = uv_udp_init(loop, &h1);
+  ASSERT(r == 0);
 
-  uv_close((uv_handle_t*) &h, NULL);
+  r = uv_udp_init(loop, &h2);
+  ASSERT(r == 0);
 
-  ASSERT(0 == uv_run(loop, UV_RUN_DEFAULT));
+  r = uv_udp_bind(&h1, (const struct sockaddr*) &addr, UV_UDP_REUSEADDR);
+  ASSERT(r == 0);
+
+  r = uv_udp_bind(&h2, (const struct sockaddr*) &addr, UV_UDP_REUSEADDR);
+  ASSERT(r == 0);
+
+  uv_close((uv_handle_t*) &h1, NULL);
+  uv_close((uv_handle_t*) &h2, NULL);
+
+  r = uv_run(loop, UV_RUN_DEFAULT);
+  ASSERT(r == 0);
 
   MAKE_VALGRIND_HAPPY();
   return 0;
