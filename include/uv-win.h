@@ -22,7 +22,6 @@
 #ifndef _WIN32_WINNT
 # define _WIN32_WINNT   0x0502
 #endif
-
 #if !defined(_SSIZE_T_) && !defined(_SSIZE_T_DEFINED)
 typedef intptr_t ssize_t;
 # define _SSIZE_T_
@@ -252,6 +251,7 @@ typedef union {
   } fallback_;
 } uv_rwlock_t;
 
+
 typedef struct {
   unsigned int n;
   unsigned int count;
@@ -260,9 +260,10 @@ typedef struct {
   uv_sem_t turnstile2;
 } uv_barrier_t;
 
-typedef struct {
-  DWORD tls_index;
-} uv_key_t;
+#define UV_KEY_PRIVATE_FIELDS \
+	DWORD tls_index; \
+	key_dtor_cb dtor_cb; \
+	void* dtor_queue[2];
 
 #define UV_ONCE_INIT { 0, NULL }
 

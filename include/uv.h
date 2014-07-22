@@ -2291,6 +2291,14 @@ UV_EXTERN int uv_cond_timedwait(uv_cond_t* cond, uv_mutex_t* mutex,
  */
 UV_EXTERN void uv_once(uv_once_t* guard, void (*callback)(void));
 
+
+/*
+ * Callback that is invoked when the thread local variable is destroyed
+ */
+typedef void(*key_dtor_cb)(void*);
+typedef struct {
+	UV_KEY_PRIVATE_FIELDS
+} uv_key_t;
 /*
  * Thread-local storage.  These functions largely follow the semantics of
  * pthread_key_create(), pthread_key_delete(), pthread_getspecific() and
@@ -2299,7 +2307,7 @@ UV_EXTERN void uv_once(uv_once_t* guard, void (*callback)(void));
  * Note that the total thread-local storage size may be limited.
  * That is, it may not be possible to create many TLS keys.
  */
-UV_EXTERN int uv_key_create(uv_key_t* key);
+UV_EXTERN int uv_key_create(uv_key_t* key, key_dtor_cb dtor);
 UV_EXTERN void uv_key_delete(uv_key_t* key);
 UV_EXTERN void* uv_key_get(uv_key_t* key);
 UV_EXTERN void uv_key_set(uv_key_t* key, void* value);

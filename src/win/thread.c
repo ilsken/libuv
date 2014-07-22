@@ -38,6 +38,9 @@
 # define NOINLINE __attribute__ ((noinline))
 #endif
 
+static QUEUE dtor_queue; /* TLS destructors*/
+static uv_once_t once = UV_ONCE_INIT;
+static uv_mutex_t mutex;
 
 inline static int uv__rwlock_srwlock_init(uv_rwlock_t* rwlock);
 inline static void uv__rwlock_srwlock_destroy(uv_rwlock_t* rwlock);
@@ -686,11 +689,22 @@ int uv_barrier_wait(uv_barrier_t* barrier) {
   return serial_thread;
 }
 
+static void init_once(void) {
+	if (uv_mutex_init(&mutex))
+		abort();
+	QUEUE_INIT(&dtor_queue);
+}
 
-int uv_key_create(uv_key_t* key) {
+int uv_key_create(uv_key_t* key, key_dtor_cb dtor) {
+  uv_once(&once, init_once);
   key->tls_index = TlsAlloc();
+  QUEUE_INIT(&key->dtor_queue);
   if (key->tls_index == TLS_OUT_OF_INDEXES)
     return UV_ENOMEM;
+  key->dtor_cb = dtor;
+  uv_mutex_lock(&mutex);
+  QUEUE_INSERT_TAIL(&dtor_queue, &key->dtor_queue);
+  uv_mutex_unlock(&mutex);
   return 0;
 }
 
@@ -699,6 +713,9 @@ void uv_key_delete(uv_key_t* key) {
   if (TlsFree(key->tls_index) == FALSE)
     abort();
   key->tls_index = TLS_OUT_OF_INDEXES;
+  uv_mutex_lock(&mutex);
+  QUEUE_REMOVE(&key->dtor_queue);
+  uv_mutex_unlock(&mutex);
 }
 
 
@@ -717,4 +734,113 @@ void* uv_key_get(uv_key_t* key) {
 void uv_key_set(uv_key_t* key, void* value) {
   if (TlsSetValue(key->tls_index, value) == FALSE)
     abort();
+}
+
+// Copyright 2014 The Chromium Authors. All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//    * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//    * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+// Thread Termination Callbacks.
+// Windows doesn't support a per-thread destructor with its
+// TLS primitives.  So, we build it manually by inserting a
+// function to be called on each thread's exit.
+// This magic is from http://www.codeproject.com/threads/tls.asp
+// and it works for VC++ 7.0 and later.
+
+// Force a reference to _tls_used to make the linker create the TLS directory
+// if it's not already there.  (e.g. if __declspec(thread) is not used).
+// Force a reference to p_thread_callback_base to prevent whole program
+// optimization from discarding the variable.
+#ifdef _WIN64
+
+#pragma comment(linker, "/INCLUDE:_tls_used")
+#pragma comment(linker, "/INCLUDE:p_thread_callback_base")
+
+#else  // _WIN64
+
+#pragma comment(linker, "/INCLUDE:__tls_used")
+#pragma comment(linker, "/INCLUDE:_p_thread_callback_base")
+
+#endif  // _WIN64
+
+// Static callback function to call with each thread termination.
+static void NTAPI uv_on_thread_exit(PVOID module, DWORD reason, PVOID reserved) {
+	// On XP SP0 & SP1, the DLL_PROCESS_ATTACH is never seen. It is sent on SP2+
+	// and on W2K and W2K3. So don't assume it is sent.
+	if (DLL_THREAD_DETACH == reason || DLL_PROCESS_DETACH == reason) {
+		// call the callbacks
+		uv_mutex_lock(&mutex);
+		QUEUE* q;
+		QUEUE_FOREACH(q, &dtor_queue) {
+			uv_key_t* key = QUEUE_DATA(q, uv_key_t, dtor_queue);
+			if (key->dtor_cb != NULL)
+				key->dtor_cb(uv_key_get(key));
+		}
+		uv_mutex_unlock(&mutex);
+	}
+		
+}
+
+// .CRT$XLA to .CRT$XLZ is an array of PIMAGE_TLS_CALLBACK pointers that are
+// called automatically by the OS loader code (not the CRT) when the module is
+// loaded and on thread creation. They are NOT called if the module has been
+// loaded by a LoadLibrary() call. It must have implicitly been loaded at
+// process startup.
+// By implicitly loaded, I mean that it is directly referenced by the main EXE
+// or by one of its dependent DLLs. Delay-loaded DLL doesn't count as being
+// implicitly loaded.
+//
+// See VC\crt\src\tlssup.c for reference.
+
+// extern "C" suppresses C++ name mangling so we know the symbol name for the
+// linker /INCLUDE:symbol pragma above.
+extern "C" {
+	// The linker must not discard p_thread_callback_base.  (We force a reference
+	// to this variable with a linker /INCLUDE:symbol pragma to ensure that.) If
+	// this variable is discarded, the OnThreadExit function will never be called.
+#ifdef _WIN64
+
+	// .CRT section is merged with .rdata on x64 so it must be constant data.
+#pragma const_seg(".CRT$XLB")
+	// When defining a const variable, it must have external linkage to be sure the
+	// linker doesn't discard it.
+	extern const PIMAGE_TLS_CALLBACK p_thread_callback_base;
+	const PIMAGE_TLS_CALLBACK p_thread_callback_base = uv_on_thread_exit;
+
+	// Reset the default section.
+#pragma const_seg()
+
+#else  // _WIN64
+
+#pragma data_seg(".CRT$XLB")
+	PIMAGE_TLS_CALLBACK p_thread_callback_base = uv_on_thread_exit;
+
+	// Reset the default section.
+#pragma data_seg()
+
+#endif  // _WIN64
 }
