@@ -129,6 +129,8 @@ int uv_udp_init(uv_loop_t* loop, uv_udp_t* handle) {
   handle->activecnt = 0;
   handle->func_wsarecv = WSARecv;
   handle->func_wsarecvfrom = WSARecvFrom;
+  handle->send_queue_size = 0;
+  handle->send_queue_count = 0;
 
   uv_req_init(loop, (uv_req_t*) &(handle->recv_req));
   handle->recv_req.type = UV_UDP_RECV;
@@ -396,12 +398,16 @@ static int uv__send(uv_udp_send_t* req,
     /* Request completed immediately. */
     req->queued_bytes = 0;
     handle->reqs_pending++;
+    handle->send_queue_size += req->queued_bytes;
+    handle->send_queue_count++;
     REGISTER_HANDLE_REQ(loop, handle, req);
     uv_insert_pending_req(loop, (uv_req_t*)req);
   } else if (UV_SUCCEEDED_WITH_IOCP(result == 0)) {
     /* Request queued by the kernel. */
-    req->queued_bytes = uv_count_bufs(bufs, nbufs);
+    req->queued_bytes = uv__count_bufs(bufs, nbufs);
     handle->reqs_pending++;
+    handle->send_queue_size += req->queued_bytes;
+    handle->send_queue_count++;
     REGISTER_HANDLE_REQ(loop, handle, req);
   } else {
     /* Send failed due to an error. */
@@ -523,6 +529,11 @@ void uv_process_udp_send_req(uv_loop_t* loop, uv_udp_t* handle,
   int err;
 
   assert(handle->type == UV_UDP);
+
+  assert(handle->send_queue_size >= req->queued_bytes);
+  assert(handle->send_queue_count >= 1);
+  handle->send_queue_size -= req->queued_bytes;
+  handle->send_queue_count--;
 
   UNREGISTER_HANDLE_REQ(loop, handle, req);
 
@@ -859,4 +870,13 @@ int uv__udp_send(uv_udp_send_t* req,
     return uv_translate_sys_error(err);
 
   return 0;
+}
+
+
+int uv__udp_try_send(uv_udp_t* handle,
+                     const uv_buf_t bufs[],
+                     unsigned int nbufs,
+                     const struct sockaddr* addr,
+                     unsigned int addrlen) {
+  return UV_ENOSYS;
 }

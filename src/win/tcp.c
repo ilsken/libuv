@@ -235,6 +235,17 @@ void uv_tcp_endgame(uv_loop_t* loop, uv_tcp_t* handle) {
 }
 
 
+/* Unlike on Unix, here we don't set SO_REUSEADDR, because it doesn't just
+ * allow binding to addresses that are in use by sockets in TIME_WAIT, it
+ * effectively allows 'stealing' a port which is in use by another application.
+ *
+ * SO_EXCLUSIVEADDRUSE is also not good here because it does cehck all sockets,
+ * regardless of state, so we'd get an error even if the port is in use by a
+ * socket in TIME_WAIT state.
+ *
+ * See issue #1360.
+ *
+ */
 static int uv_tcp_try_bind(uv_tcp_t* handle,
                            const struct sockaddr* addr,
                            unsigned int addrlen,
@@ -244,7 +255,7 @@ static int uv_tcp_try_bind(uv_tcp_t* handle,
 
   if (handle->socket == INVALID_SOCKET) {
     SOCKET sock;
-    
+
     /* Cannot set IPv6-only mode on non-IPv6 socket. */
     if ((flags & UV_TCP_IPV6ONLY) && addr->sa_family != AF_INET6)
       return ERROR_INVALID_PARAMETER;
@@ -839,7 +850,7 @@ int uv_tcp_write(uv_loop_t* loop,
     uv_insert_pending_req(loop, (uv_req_t*) req);
   } else if (UV_SUCCEEDED_WITH_IOCP(result == 0)) {
     /* Request queued by the kernel. */
-    req->queued_bytes = uv_count_bufs(bufs, nbufs);
+    req->queued_bytes = uv__count_bufs(bufs, nbufs);
     handle->reqs_pending++;
     handle->write_reqs_pending++;
     REGISTER_HANDLE_REQ(loop, handle, req);

@@ -56,6 +56,7 @@ TEST_DECLARE   (delayed_accept)
 TEST_DECLARE   (multiple_listen)
 TEST_DECLARE   (tcp_writealot)
 TEST_DECLARE   (tcp_try_write)
+TEST_DECLARE   (tcp_write_queue_order)
 TEST_DECLARE   (tcp_open)
 TEST_DECLARE   (tcp_connect_error_after_write)
 TEST_DECLARE   (tcp_shutdown_after_write)
@@ -84,6 +85,7 @@ TEST_DECLARE   (tcp_bind6_localhost_ok)
 TEST_DECLARE   (udp_bind)
 TEST_DECLARE   (udp_bind_reuseaddr)
 TEST_DECLARE   (udp_send_and_recv)
+TEST_DECLARE   (udp_send_immediate)
 TEST_DECLARE   (udp_multicast_join)
 TEST_DECLARE   (udp_multicast_join6)
 TEST_DECLARE   (udp_multicast_ttl)
@@ -95,6 +97,7 @@ TEST_DECLARE   (udp_ipv6_only)
 TEST_DECLARE   (udp_options)
 TEST_DECLARE   (udp_no_autobind)
 TEST_DECLARE   (udp_open)
+TEST_DECLARE   (udp_try_send)
 TEST_DECLARE   (pipe_bind_error_addrinuse)
 TEST_DECLARE   (pipe_bind_error_addrnotavail)
 TEST_DECLARE   (pipe_bind_error_inval)
@@ -229,6 +232,7 @@ TEST_DECLARE   (threadpool_queue_work_simple)
 TEST_DECLARE   (threadpool_queue_work_einval)
 TEST_DECLARE   (threadpool_multiple_event_loops)
 TEST_DECLARE   (threadpool_cancel_getaddrinfo)
+TEST_DECLARE   (threadpool_cancel_getnameinfo)
 TEST_DECLARE   (threadpool_cancel_work)
 TEST_DECLARE   (threadpool_cancel_fs)
 TEST_DECLARE   (threadpool_cancel_single)
@@ -240,12 +244,12 @@ TEST_DECLARE   (dlerror)
 TEST_DECLARE   (poll_duplex)
 TEST_DECLARE   (poll_unidirectional)
 TEST_DECLARE   (poll_close)
-#ifdef _WIN32
-TEST_DECLARE   (poll_closesocket)
-#endif
+
 TEST_DECLARE   (ip4_addr)
 TEST_DECLARE   (ip6_addr_link_local)
+
 #ifdef _WIN32
+TEST_DECLARE   (poll_closesocket)
 TEST_DECLARE   (spawn_detect_pipe_name_collisions_on_windows)
 TEST_DECLARE   (argument_escaping)
 TEST_DECLARE   (environment_creation)
@@ -329,6 +333,8 @@ TASK_LIST_START
 
   TEST_ENTRY  (tcp_try_write)
 
+  TEST_ENTRY  (tcp_write_queue_order)
+
   TEST_ENTRY  (tcp_open)
   TEST_HELPER (tcp_open, tcp4_echo_server)
 
@@ -365,6 +371,7 @@ TASK_LIST_START
   TEST_ENTRY  (udp_bind)
   TEST_ENTRY  (udp_bind_reuseaddr)
   TEST_ENTRY  (udp_send_and_recv)
+  TEST_ENTRY  (udp_send_immediate)
   TEST_ENTRY  (udp_dgram_too_big)
   TEST_ENTRY  (udp_dual_stack)
   TEST_ENTRY  (udp_ipv6_only)
@@ -375,6 +382,7 @@ TASK_LIST_START
   TEST_ENTRY  (udp_multicast_join)
   TEST_ENTRY  (udp_multicast_join6)
   TEST_ENTRY  (udp_multicast_ttl)
+  TEST_ENTRY  (udp_try_send)
 
   TEST_ENTRY  (udp_open)
   TEST_HELPER (udp_open, udp4_echo_server)
@@ -486,9 +494,6 @@ TASK_LIST_START
   TEST_ENTRY  (poll_duplex)
   TEST_ENTRY  (poll_unidirectional)
   TEST_ENTRY  (poll_close)
-#ifdef _WIN32
-  TEST_ENTRY  (poll_closesocket)
-#endif
 
   TEST_ENTRY  (spawn_fails)
   TEST_ENTRY  (spawn_exit_code)
@@ -512,6 +517,7 @@ TASK_LIST_START
   TEST_ENTRY  (kill)
 
 #ifdef _WIN32
+  TEST_ENTRY  (poll_closesocket)
   TEST_ENTRY  (spawn_detect_pipe_name_collisions_on_windows)
   TEST_ENTRY  (argument_escaping)
   TEST_ENTRY  (environment_creation)
@@ -573,6 +579,7 @@ TASK_LIST_START
   TEST_ENTRY  (threadpool_queue_work_einval)
   TEST_ENTRY  (threadpool_multiple_event_loops)
   TEST_ENTRY  (threadpool_cancel_getaddrinfo)
+  TEST_ENTRY  (threadpool_cancel_getnameinfo)
   TEST_ENTRY  (threadpool_cancel_work)
   TEST_ENTRY  (threadpool_cancel_fs)
   TEST_ENTRY  (threadpool_cancel_single)
